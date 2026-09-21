@@ -36,6 +36,7 @@ jobs:
         service:
           - catalogue
           - ratings
+          - mysql
 
     steps:
       - name: Checkout repository
