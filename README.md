@@ -1,128 +1,674 @@
-# Three Tier Architecture Deployment on AWS EKS
+# Three-Tier Microservices Deployment with Kubernetes & Helm
 
-Stan's Robot Shop is a sample microservice application you can use as a sandbox to test and learn containerised application orchestration and monitoring techniques. It is not intended to be a comprehensive reference example of how to write a microservices application, although you will better understand some of those concepts by playing with Stan's Robot Shop. To be clear, the error handling is patchy and there is not any security built into the application.
+![CI](https://github.com/Agarshal/three-tier-architecture-demo/actions/workflows/ci.yml/badge.svg)
 
-You can get more detailed information from my [blog post](https://www.instana.com/blog/stans-robot-shop-sample-microservice-application/) about this sample microservice application.
+A containerized microservices application deployed and managed using Docker, Kubernetes, Helm, and GitHub Actions.
 
-This sample microservice application has been built using these technologies:
-- NodeJS ([Express](http://expressjs.com/))
-- Java ([Spring Boot](https://spring.io/))
-- Python ([Flask](http://flask.pocoo.org))
-- Golang
-- PHP (Apache)
-- MongoDB
-- Redis
-- MySQL ([Maxmind](http://www.maxmind.com) data)
-- RabbitMQ
-- Nginx
-- AngularJS (1.x)
+This project is based on **Stan's Robot Shop**, an open-source microservices sample originally created by Instana. I forked the project and extended it as a hands-on DevOps/Kubernetes project by implementing Kubernetes configuration improvements, Helm customization, secret-based credential management, scaling, self-healing validation, persistent storage testing, resource monitoring, and CI validation.
 
-The various services in the sample application already include all required Instana components installed and configured. The Instana components provide automatic instrumentation for complete end to end [tracing](https://docs.instana.io/core_concepts/tracing/), as well as complete visibility into time series metrics for all the technologies.
+> **Attribution:** The underlying Robot Shop application and its original microservices are from the Instana Robot Shop project. This repository documents my deployment, configuration, DevOps, and infrastructure work on top of that project.
 
-To see the application performance results in the Instana dashboard, you will first need an Instana account. Don't worry a [trial account](https://instana.com/trial?utm_source=github&utm_medium=robot_shop) is free.
+---
 
-## Build from Source
-To optionally build from source (you will need a newish version of Docker to do this) use Docker Compose. Optionally edit the `.env` file to specify an alternative image registry and version tag; see the official [documentation](https://docs.docker.com/compose/env-file/) for more information.
+## Architecture
 
-To download the tracing module for Nginx, it needs a valid Instana agent key. Set this in the environment before starting the build.
+```mermaid
+flowchart TB
 
-```shell
-$ export INSTANA_AGENT_KEY="<your agent key>"
+    User[User / Browser]
+
+    subgraph K8s[Kubernetes Cluster - robot-shop namespace]
+
+        Web[Web / Nginx]
+
+        subgraph Services[Application Services]
+            Catalogue[Catalogue]
+            UserSvc[User]
+            Cart[Cart]
+            Shipping[Shipping]
+            Payment[Payment]
+            Ratings[Ratings]
+            Dispatch[Dispatch]
+        end
+
+        subgraph Messaging[Messaging & Cache]
+            Redis[(Redis)]
+            RabbitMQ[(RabbitMQ)]
+        end
+
+        subgraph Databases[Databases]
+            MongoDB[(MongoDB)]
+            MySQL[(MySQL)]
+        end
+
+        Web --> Catalogue
+        Web --> UserSvc
+        Web --> Cart
+        Web --> Shipping
+        Web --> Payment
+        Web --> Ratings
+
+        Catalogue --> MongoDB
+        UserSvc --> MongoDB
+        Cart --> Redis
+        Cart --> RabbitMQ
+        Payment --> MySQL
+        Ratings --> MySQL
+        Shipping --> MySQL
+        Dispatch --> RabbitMQ
+    end
+
+    User --> Web
 ```
 
-Now build all the images.
+### Kubernetes Architecture
 
-```shell
-$ docker-compose build
+```mermaid
+flowchart LR
+
+    Developer[Developer]
+    GitHub[GitHub Repository]
+    Actions[GitHub Actions CI]
+
+    Developer --> GitHub
+    GitHub --> Actions
+
+    Actions --> Helm[Helm Validation]
+    Actions --> Docker[Docker Image Builds]
+
+    Helm --> Cluster[Kubernetes / Minikube]
+    Docker --> Images[Service Images]
+
+    Images --> Cluster
 ```
 
-If you modified the `.env` file and changed the image registry, you need to push the images to that registry
+---
 
-```shell
-$ docker-compose push
-```
+## Project Highlights
 
-## Run Locally
-You can run it locally for testing.
-
-If you did not build from source, don't worry all the images are on Docker Hub. Just pull down those images first using:
-
-```shell
-$ docker-compose pull
-```
-
-Fire up Stan's Robot Shop with:
-
-```shell
-$ docker-compose up
-```
-
-If you want to fire up some load as well:
-
-```shell
-$ docker-compose -f docker-compose.yaml -f docker-compose-load.yaml up
-```
-
-If you are running it locally on a Linux host you can also run the Instana [agent](https://docs.instana.io/quick_start/agent_setup/container/docker/) locally, unfortunately the agent is currently not supported on Mac.
-
-There is also only limited support on ARM architectures at the moment.
-
-## Marathon / DCOS
-
-The manifests for robotshop are in the *DCOS/* directory. These manifests were built using a fresh install of DCOS 1.11.0. They should work on a vanilla HA or single instance install.
-
-You may install Instana via the DCOS package manager, instructions are here: https://github.com/dcos/examples/tree/master/instana-agent/1.9
-
-## Kubernetes
-You can run Kubernetes locally using [minikube](https://github.com/kubernetes/minikube) or on one of the many cloud providers.
-
-The Docker container images are all available on [Docker Hub](https://hub.docker.com/u/robotshop/).
-
-Install Stan's Robot Shop to your Kubernetes cluster using the [Helm](K8s/helm/README.md) chart.
-
-To deploy the Instana agent to Kubernetes, just use the [helm](https://github.com/instana/helm-charts) chart.
-
-## Accessing the Store
-If you are running the store locally via *docker-compose up* then, the store front is available on localhost port 8080 [http://localhost:8080](http://localhost:8080/)
-
-If you are running the store on Kubernetes via minikube then, find the IP address of Minikube and the Node Port of the web service.
-
-```shell
-$ minikube ip
-$ kubectl get svc web
-```
-
-If you are using a cloud Kubernetes / Openshift / Mesosphere then it will be available on the load balancer of that system.
-
-## Load Generation
-A separate load generation utility is provided in the `load-gen` directory. This is not automatically run when the application is started. The load generator is built with Python and [Locust](https://locust.io). The `build.sh` script builds the Docker image, optionally taking *push* as the first argument to also push the image to the registry. The registry and tag settings are loaded from the `.env` file in the parent directory. The script `load-gen.sh` runs the image, it takes a number of command line arguments. You could run the container inside an orchestration system (K8s) as well if you want to, an example descriptor is provided in K8s directory. For End-user Monitoring ,load is not automatically generated but by navigating through the Robotshop from the browser .For more details see the [README](load-gen/README.md) in the load-gen directory.  
-
-## Website Monitoring / End-User Monitoring
-
-### Docker Compose
-
-To enable Website Monioring / End-User Monitoring (EUM) see the official [documentation](https://docs.instana.io/website_monitoring/) for how to create a configuration. There is no need to inject the JavaScript fragment into the page, this will be handled automatically. Just make a note of the unique key and set the environment variable `INSTANA_EUM_KEY` and `INSTANA_EUM_REPORTING_URL` for the web image within `docker-compose.yaml`.
+### Containerization
+- Dockerized microservices architecture
+- Docker Compose support for local development
+- Individual Dockerfiles for application services
+- Tested Docker image builds locally and through GitHub Actions
 
 ### Kubernetes
+- Deployed the complete Robot Shop application to Kubernetes
+- Used a dedicated `robot-shop` namespace
+- Configured Kubernetes Deployments, Services and StatefulSets
+- Used ClusterIP services for internal service communication
+- Exposed the web frontend using a NodePort service
+- Verified Kubernetes service discovery between microservices
 
-The Helm chart for installing Stan's Robot Shop supports setting the key and endpoint url required for website monitoring, see the [README](K8s/helm/README.md).
+### Helm
+- Customized the existing Helm chart
+- Added configurable catalogue replicas
+- Added a ConfigMap for catalogue MongoDB configuration
+- Added Kubernetes Secret references for Ratings database credentials
+- Parameterized application configuration through `values.yaml`
+- Validated the chart using `helm lint` and `helm template`
 
-## Prometheus
+### Security
+- Removed the hardcoded Ratings database password from source code
+- Moved Ratings database credentials to a Kubernetes Secret
+- Injected the password into workloads using `secretKeyRef`
+- Updated MySQL initialization to consume the password through an environment variable
+- Verified that the previous hardcoded password no longer exists in the Git repository
 
-The cart and payment services both have Prometheus metric endpoints. These are accessible on `/metrics`. The cart service provides:
+### Reliability & Kubernetes Operations
+- Scaled the Catalogue deployment from 1 to 3 replicas
+- Verified Kubernetes self-healing by deleting a running pod and observing automatic replacement
+- Performed Kubernetes rollout updates
+- Tested deployment rollback using Kubernetes rollout history
+- Configured readiness probes for application health checks
 
-* Counter of the number of items added to the cart
+### Persistent Storage
+- Redis uses a Kubernetes PersistentVolumeClaim
+- Verified that Redis data survives pod deletion and recreation
+- PVC configured with 1 GiB storage using the Kubernetes `standard` StorageClass
 
-The payment services provides:
+### Monitoring
+- Enabled Kubernetes Metrics Server
+- Used `kubectl top pods` to inspect CPU and memory usage
+- Verified resource consumption across application services
+- Robot Shop also exposes Prometheus-compatible metrics endpoints for selected services
 
-* Counter of the number of items perchased
-* Histogram of the total number of items in each cart
-* Histogram of the total value of each cart
+### CI/CD
+GitHub Actions automatically validates the project on pushes and pull requests.
 
-To test the metrics use:
+The CI pipeline performs:
 
-```shell
-$ curl http://<host>:8080/api/cart/metrics
-$ curl http://<host>:8080/api/payment/metrics
+1. Helm lint validation
+2. Helm template rendering
+3. Catalogue Docker image build
+4. Ratings Docker image build
+5. MySQL Docker image build
+
+Workflow:
+
+```text
+Git Push
+   │
+   ▼
+GitHub Actions
+   │
+   ├── Helm Lint
+   ├── Helm Template
+   │
+   ├── Build Catalogue
+   ├── Build Ratings
+   └── Build MySQL
 ```
 
+---
+
+## Technology Stack
+
+| Category | Technologies |
+|---|---|
+| Containers | Docker |
+| Container Orchestration | Kubernetes |
+| Package Management | Helm |
+| CI/CD | GitHub Actions |
+| Frontend | AngularJS / Nginx |
+| Backend | Node.js, Python, Java, Go, PHP |
+| Databases | MongoDB, MySQL |
+| Cache | Redis |
+| Messaging | RabbitMQ |
+| Local Kubernetes | Minikube |
+| Monitoring | Kubernetes Metrics Server |
+| Configuration | ConfigMaps |
+| Secrets | Kubernetes Secrets |
+| Version Control | Git / GitHub |
+
+---
+
+## Microservices
+
+The application contains multiple independent services:
+
+- Web
+- Catalogue
+- User
+- Cart
+- Shipping
+- Payment
+- Ratings
+- Dispatch
+- MongoDB
+- MySQL
+- Redis
+- RabbitMQ
+
+Each service communicates through Kubernetes service discovery.
+
+For example:
+
+```text
+web
+ │
+ └── catalogue:8080
+        │
+        └── mongodb:27017
+```
+
+Kubernetes DNS allows services to communicate using service names instead of hardcoded IP addresses.
+
+---
+
+# Running Locally with Docker Compose
+
+Make sure Docker and Docker Compose are installed.
+
+Start the application:
+
+```bash
+docker compose up -d
+```
+
+Check the running containers:
+
+```bash
+docker compose ps
+```
+
+Access the application:
+
+```text
+http://localhost:8080
+```
+
+Stop the application:
+
+```bash
+docker compose down
+```
+
+---
+
+# Deploying to Kubernetes with Helm
+
+## 1. Start Minikube
+
+```bash
+minikube start --driver=docker
+```
+
+Verify:
+
+```bash
+kubectl get nodes
+```
+
+## 2. Create the namespace
+
+```bash
+kubectl create namespace robot-shop
+```
+
+## 3. Install the Helm chart
+
+```bash
+helm install robot-shop K8s/helm -n robot-shop
+```
+
+Check deployments:
+
+```bash
+kubectl get deployments -n robot-shop
+```
+
+Check pods:
+
+```bash
+kubectl get pods -n robot-shop
+```
+
+Check services:
+
+```bash
+kubectl get svc -n robot-shop
+```
+
+## 4. Access the application
+
+```bash
+minikube service web -n robot-shop --url
+```
+
+Open the displayed URL in a browser.
+
+---
+
+# Helm Validation
+
+Before deployment, validate the chart:
+
+```bash
+helm lint K8s/helm
+```
+
+Render the Kubernetes manifests:
+
+```bash
+helm template robot-shop K8s/helm
+```
+
+---
+
+# Scaling
+
+The Catalogue service can be horizontally scaled:
+
+```bash
+kubectl scale deployment catalogue \
+  --replicas=3 \
+  -n robot-shop
+```
+
+Verify:
+
+```bash
+kubectl get deployment catalogue -n robot-shop
+```
+
+Expected:
+
+```text
+3/3
+```
+
+Check the service endpoints:
+
+```bash
+kubectl get endpoints catalogue -n robot-shop
+```
+
+---
+
+# Self-Healing
+
+Kubernetes automatically recreates failed pods.
+
+Example:
+
+```bash
+kubectl get pods -n robot-shop
+```
+
+Delete a Catalogue pod:
+
+```bash
+kubectl delete pod <catalogue-pod> -n robot-shop
+```
+
+Then check:
+
+```bash
+kubectl get pods -n robot-shop
+```
+
+Kubernetes creates a replacement pod automatically.
+
+---
+
+# Rollouts and Rollbacks
+
+View rollout history:
+
+```bash
+kubectl rollout history deployment/catalogue -n robot-shop
+```
+
+Check a specific revision:
+
+```bash
+kubectl rollout history deployment/catalogue \
+  --revision=2 \
+  -n robot-shop
+```
+
+Rollback:
+
+```bash
+kubectl rollout undo deployment/catalogue \
+  --to-revision=2 \
+  -n robot-shop
+```
+
+Verify:
+
+```bash
+kubectl rollout status deployment/catalogue -n robot-shop
+```
+
+---
+
+# Resource Monitoring
+
+Enable Metrics Server in Minikube:
+
+```bash
+minikube addons enable metrics-server
+```
+
+View pod resource usage:
+
+```bash
+kubectl top pods -n robot-shop
+```
+
+View node resource usage:
+
+```bash
+kubectl top nodes
+```
+
+---
+
+# Persistent Storage
+
+Redis uses a PersistentVolumeClaim.
+
+Check:
+
+```bash
+kubectl get pvc -n robot-shop
+```
+
+Example:
+
+```text
+data-redis-0
+```
+
+The Redis StatefulSet mounts persistent storage at:
+
+```text
+/mnt/redis
+```
+
+This allows Redis data stored on the mounted volume to survive pod recreation.
+
+---
+
+# Configuration Management
+
+The Catalogue service uses a Kubernetes ConfigMap for its MongoDB connection string.
+
+Check:
+
+```bash
+kubectl get configmap catalogue-config -n robot-shop
+```
+
+The configuration contains:
+
+```text
+MONGO_URL=mongodb://mongodb:27017/catalogue
+```
+
+This keeps environment-specific configuration outside the application image.
+
+---
+
+# Secret Management
+
+Ratings database credentials are supplied through a Kubernetes Secret.
+
+Check:
+
+```bash
+kubectl get secret ratings-db -n robot-shop
+```
+
+The Ratings deployment reads:
+
+```text
+DB_USER
+DB_PASSWORD
+```
+
+from the Secret using `secretKeyRef`.
+
+The MySQL deployment also consumes the database password through the same Secret.
+
+No plaintext database password is stored in the application source code.
+
+> For production environments, an external secret manager such as AWS Secrets Manager, HashiCorp Vault, or another Kubernetes secret-management solution would be preferable.
+
+---
+
+# GitHub Actions CI
+
+The repository contains:
+
+```text
+.github/workflows/ci.yml
+```
+
+The workflow runs on pushes and pull requests targeting `master`.
+
+Pipeline stages:
+
+```text
+                    ┌───────────────┐
+                    │ GitHub Push   │
+                    └───────┬───────┘
+                            │
+                            ▼
+                    ┌───────────────┐
+                    │ Validate Helm │
+                    └───────┬───────┘
+                            │
+              ┌─────────────┼─────────────┐
+              ▼             ▼             ▼
+        Catalogue        Ratings         MySQL
+        Docker Build     Docker Build    Docker Build
+              │             │             │
+              └─────────────┼─────────────┘
+                            ▼
+                       CI Result
+```
+
+The current pipeline does not push images to a registry. It validates that the Docker images can be successfully built.
+
+---
+
+# Useful Kubernetes Commands
+
+View all resources:
+
+```bash
+kubectl get all -n robot-shop
+```
+
+View pod details:
+
+```bash
+kubectl describe pod <pod-name> -n robot-shop
+```
+
+View application logs:
+
+```bash
+kubectl logs deployment/catalogue -n robot-shop
+```
+
+Execute a command inside a container:
+
+```bash
+kubectl exec -it <pod-name> -n robot-shop -- /bin/sh
+```
+
+View service endpoints:
+
+```bash
+kubectl get endpoints -n robot-shop
+```
+
+---
+
+# Project Structure
+
+```text
+three-tier-architecture-demo/
+│
+├── .github/
+│   └── workflows/
+│       └── ci.yml
+│
+├── K8s/
+│   └── helm/
+│       ├── templates/
+│       ├── values.yaml
+│       └── Chart.yaml
+│
+├── catalogue/
+├── cart/
+├── dispatch/
+├── payment/
+├── ratings/
+├── shipping/
+├── user/
+├── web/
+│
+├── mysql/
+├── mongodb/
+├── redis/
+├── rabbitmq/
+│
+└── README.md
+```
+
+---
+
+# What I Implemented
+
+The main DevOps and Kubernetes work performed in this repository includes:
+
+- Customized Helm deployments and values
+- Added configurable Catalogue replicas
+- Added Catalogue ConfigMap configuration
+- Implemented Kubernetes Secret-based Ratings credentials
+- Removed hardcoded database credentials from source
+- Updated MySQL initialization to consume credentials from environment variables
+- Built and tested Docker images locally
+- Added GitHub Actions CI
+- Added MySQL, Ratings and Catalogue image builds to CI
+- Removed the legacy Docker Compose GitHub Actions workflow
+- Deployed the application to Minikube
+- Tested Kubernetes service discovery
+- Tested horizontal scaling
+- Tested Kubernetes self-healing
+- Tested rollout history and rollback
+- Enabled Metrics Server
+- Monitored pod resource consumption
+- Verified Redis persistent storage across pod recreation
+
+---
+
+# Future Improvements
+
+Possible next steps for production-style deployment include:
+
+- Terraform infrastructure as code
+- AWS EKS deployment
+- GitHub Actions image publishing to Amazon ECR or GHCR
+- Continuous deployment to Kubernetes
+- Prometheus and Grafana dashboards
+- Container vulnerability scanning
+- Kubernetes NetworkPolicies
+- Non-root containers
+- Resource requests and limits for all services
+- Persistent storage for MongoDB and MySQL
+- External secret management
+- Ingress and TLS
+- Horizontal Pod Autoscaling
+- Centralized logging
+
+---
+
+# Original Project
+
+This project uses the Robot Shop sample application originally developed by Instana.
+
+The original project was designed as a sandbox for learning container orchestration and monitoring with a multi-service application.
+
+This repository extends that foundation with additional Kubernetes, Helm, security, reliability, monitoring, and CI/CD work.
+
+Original project:
+
+https://github.com/instana/robot-shop
+
+---
+
+## Author
+
+**Agarshal**
+
+B.Tech Artificial Intelligence & Data Science
+
+GitHub:
+
+https://github.com/Agarshal
