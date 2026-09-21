@@ -21,6 +21,12 @@ spec:
       - name: mysql
         image: {{ .Values.image.repo }}/rs-mysql-db:{{ .Values.image.version }}
         imagePullPolicy: {{ .Values.image.pullPolicy }}
+        env:
+        - name: RATINGS_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: ratings-db
+              key: password
         # added for Istio
         securityContext:
           capabilities:
