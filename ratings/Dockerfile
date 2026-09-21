@@ -3,7 +3,7 @@
 #
 FROM php:7.4-apache
 
-RUN apt-get update && apt-get install -yqq unzip libzip-dev \
+RUN apt-get update && apt-get install -yqq libzip-dev \
     && docker-php-ext-install pdo_mysql opcache zip
 
 # Enable AutoProfile for PHP which is currently opt-in beta
