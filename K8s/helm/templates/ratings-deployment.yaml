@@ -19,8 +19,21 @@ spec:
       {{ end }}
       containers:
       - name: ratings
-        image: {{ .Values.image.repo }}/rs-ratings:{{ .Values.image.version }}
+        image: {{ .Values.ratings.image | default (printf "%s/rs-ratings:%s" .Values.image.repo .Values.image.version) }}
         imagePullPolicy: {{ .Values.image.pullPolicy }}
+        env:
+        - name: PDO_URL
+          value: "mysql:host=mysql;dbname=ratings;charset=utf8mb4"
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: ratings-db
+              key: username
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: ratings-db
+              key: password
         ports:
         - containerPort: 80
         resources:

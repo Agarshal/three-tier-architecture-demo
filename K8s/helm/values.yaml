@@ -35,7 +35,9 @@ ocCreateRoute: false
 
 cart: {}
 
-catalogue: {}
+catalogue:
+    replicas: 1
+    mongoUrl: mongodb://mongodb:27017/catalogue
 
 dispatch: {}
 
